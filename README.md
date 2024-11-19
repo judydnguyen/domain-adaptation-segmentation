@@ -88,3 +88,9 @@ Should you need help with this, just open an issue.
 ## TensorRT inference
 
 If you want to run the model inference with TensorRT runtime, here is a blog post from Nvidia that covers this: [Speeding Up Deep Learning Inference Using TensorRT](https://developer.nvidia.com/blog/speeding-up-deep-learning-inference-using-tensorrt/).
+
+
+## Judy's Notes
+- Dataset: [kaggle-link](https://www.kaggle.com/datasets/mateuszbuda/lgg-mri-segmentation), can be downloaded as `.zip` or using `kaggle-hub`
+- Pre-trained model saved at: `weights/unet.pt`
+- I prepared a `.ipynb` file to load and run the inference on MRI images at `load_data.ipynb`.
