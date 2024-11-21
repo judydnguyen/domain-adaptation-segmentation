@@ -1,12 +1,22 @@
+from glob import glob
 import os
 import random
 
 import numpy as np
+from sklearn.impute import SimpleImputer
 import torch
 from skimage.io import imread
-from torch.utils.data import Dataset
+
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms as T
+import albumentations as A
+
+import cv2
+import pandas as pd
+import matplotlib.pyplot as plt
 
 from utils import crop_sample, pad_sample, resize_sample, normalize_volume
+from sklearn.model_selection import train_test_split
 
 
 class BrainSegmentationDataset(Dataset):
@@ -134,3 +144,99 @@ class BrainSegmentationDataset(Dataset):
 
         # return tensors
         return image_tensor, mask_tensor
+
+class MriDataset(Dataset):
+    def __init__(self, df, transform=None, mean=0.5, std=0.25):
+        super(MriDataset, self).__init__()
+        self.df = df
+        self.transform = transform
+        self.mean = mean
+        self.std = std
+        
+        
+    def __len__(self):
+        return len(self.df)
+        
+    def __getitem__(self, idx, raw=False):
+        row = self.df.iloc[idx]
+        img = cv2.imread(row['image_filename'], cv2.IMREAD_UNCHANGED)
+        mask = cv2.imread(row['mask_filename'], cv2.IMREAD_GRAYSCALE)
+        if raw:
+            return img, mask
+        
+        if self.transform:
+            augmented = self.transform(image=img, mask=mask)
+            image, mask = augmented['image'], augmented['mask']
+        
+        img = T.functional.to_tensor(img)
+        mask = mask // 255
+        mask = torch.Tensor(mask)
+        return img, mask
+    
+def get_file_row(path):
+    """Produces ID of a patient, image and mask filenames from a particular path"""
+    path_no_ext, ext = os.path.splitext(path)
+    filename = os.path.basename(path)
+    
+    patient_id = '_'.join(filename.split('_')[:3]) # Patient ID in the csv file consists of 3 first filename segments
+    
+    return [patient_id, path, f'{path_no_ext}_mask{ext}']
+
+def get_train_test_loaders(args):
+    files_dir = 'datasets/2/lgg-mri-segmentation/kaggle_3m/'
+    file_paths = glob(f'{files_dir}/*/*[0-9].tif')
+    
+    csv_path = 'datasets/2/lgg-mri-segmentation/kaggle_3m/data.csv'
+    df = pd.read_csv(csv_path)
+
+    # df.info()
+    imputer = SimpleImputer(strategy="most_frequent")
+    df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+    
+    # merge original df and filenames based on patient
+    filenames_df = pd.DataFrame((get_file_row(filename) for filename in file_paths), columns=['Patient', 'image_filename', 'mask_filename'])
+    df = pd.merge(df, filenames_df, on="Patient")
+
+    # ### Split data into train, valid, and test
+    train_df, test_df = train_test_split(df, test_size=0.3)
+    test_df, valid_df = train_test_split(test_df, test_size=0.5)
+
+
+    transform = A.Compose([
+        A.ChannelDropout(p=0.3),
+        A.RandomBrightnessContrast(p=0.3),
+        A.ColorJitter(p=0.3),
+    ])
+
+    train_dataset = MriDataset(train_df, transform)
+    valid_dataset = MriDataset(valid_df)
+    test_dataset = MriDataset(test_df)
+
+
+    # ### DataLoaders
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=False)
+    
+    return train_loader, valid_loader, test_loader
+
+def plot_examples(dataset, n_samples=4, save_path="dataset_examples.png"):
+    fig, axs = plt.subplots(n_samples, 3, figsize=(20, n_samples*7), constrained_layout=True)
+    i = 0
+    for ax in axs:
+        while True:
+            image, mask = dataset.__getitem__(i, raw=True)
+            i += 1
+            if np.any(mask): 
+                ax[0].set_title("MRI images")
+                ax[0].imshow(image)
+                ax[1].set_title("Highlited abnormality")
+                ax[1].imshow(image)
+                ax[1].imshow(mask, alpha=0.2)
+                ax[2].imshow(mask)
+                ax[2].set_title("Abnormality mask")
+                break
+    # Save the figure instead of showing it
+    plt.savefig(save_path)
+    plt.close(fig)

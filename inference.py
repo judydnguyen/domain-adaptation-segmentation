@@ -23,7 +23,7 @@ def main(args):
 
     with torch.set_grad_enabled(False):
         unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
-        state_dict = torch.load(args.weights, map_location=device)
+        state_dict = torch.load(args.weights, map_location=device, weights_only=True)
         unet.load_state_dict(state_dict)
         unet.eval()
         unet.to(device)
@@ -55,9 +55,13 @@ def main(args):
     )
 
     dsc_dist = dsc_distribution(volumes)
+    
+    print("DSC distribution: {}".format(dsc_dist))
 
     dsc_dist_plot = plot_dsc(dsc_dist)
     imsave(args.figure, dsc_dist_plot)
+    print("Mean DSC: {:.3f}".format(np.mean(list(dsc_dist.values()))))
+    print(f"Saved DSC distribution plot to {args.figure}")
 
     for p in volumes:
         x = volumes[p][0]
@@ -91,6 +95,7 @@ def postprocess_per_volume(
     volumes = {}
     num_slices = np.bincount([p[0] for p in patient_slice_index])
     index = 0
+    import IPython; IPython.embed()
     for p in range(len(num_slices)):
         volume_in = np.array(input_list[index : index + num_slices[p]])
         volume_pred = np.round(

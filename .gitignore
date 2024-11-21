@@ -1,6 +1,9 @@
 kaggle_3m
 logs
 predictions
+*.pt
+*.pth
+datasets/*
 
 # Created by https://www.gitignore.io/api/osx,linux,matlab,python,pycharm+all,intellij+all,jupyternotebook
 
