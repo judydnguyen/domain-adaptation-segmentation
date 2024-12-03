@@ -18,26 +18,6 @@ If you use code or weights shared in this repository, please consider citing:
 }
 ```
 
-## docker
-
-```
-docker build -t brainseg .
-```
-
-```
-nvidia-docker run --rm --shm-size 8G -it -v `pwd`:/workspace brainseg
-```
-
-## PyTorch Hub
-
-Loading model using PyTorch Hub: [pytorch.org/hub/mateuszbuda\_brain-segmentation-pytorch\_unet](https://pytorch.org/hub/mateuszbuda_brain-segmentation-pytorch_unet/)
-
-```python
-import torch
-model = torch.hub.load('mateuszbuda/brain-segmentation-pytorch', 'unet',
-    in_channels=3, out_channels=1, init_features=32, pretrained=True)
-```
-
 ## data
 
 ![dataset](./assets/brain-mri-lgg.png)
@@ -85,12 +65,11 @@ Due to memory limitations for Kaggle kernels, input images are of size 224x224 i
 Running this code on a custom dataset would likely require adjustments in `dataset.py`.
 Should you need help with this, just open an issue.
 
-## TensorRT inference
-
-If you want to run the model inference with TensorRT runtime, here is a blog post from Nvidia that covers this: [Speeding Up Deep Learning Inference Using TensorRT](https://developer.nvidia.com/blog/speeding-up-deep-learning-inference-using-tensorrt/).
-
 
 ## Judy's Notes
-- Dataset: [kaggle-link](https://www.kaggle.com/datasets/mateuszbuda/lgg-mri-segmentation), can be downloaded as `.zip` or using `kaggle-hub`
-- Pre-trained model saved at: `weights/unet.pt`
+- Datasets: 
+  - MRI: [kaggle-link](https://www.kaggle.com/datasets/mateuszbuda/lgg-mri-segmentation), can be downloaded as `.zip` or using `kaggle-hub`
+  - CT: https://www.kaggle.com/datasets/mahmoudshaheen1134/brain-tumor-dataset/data
+- Pre-trained model ckpt: https://vanderbilt.box.com/s/kcb6n5n3e92janqnbvhmrsffsyardkzq
 - I prepared a `.ipynb` file to load and run the inference on MRI images at `load_data.ipynb`.
+- Test on CT dataset: `test_brain_tumors.ipynb`
