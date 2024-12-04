@@ -73,3 +73,7 @@ Should you need help with this, just open an issue.
 - Pre-trained model ckpt: https://vanderbilt.box.com/s/kcb6n5n3e92janqnbvhmrsffsyardkzq
 - I prepared a `.ipynb` file to load and run the inference on MRI images at `load_data.ipynb`.
 - Test on CT dataset: `test_brain_tumors.ipynb`
+- Running fine-tuning model on labeled dataset
+```
+python3 finetune_brain_tumors.py --batch_size 1 --save_model ct_ft_model.pth --lr 0.0
+```

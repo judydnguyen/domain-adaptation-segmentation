@@ -240,3 +240,147 @@ def plot_examples(dataset, n_samples=4, save_path="dataset_examples.png"):
     # Save the figure instead of showing it
     plt.savefig(save_path)
     plt.close(fig)
+    
+# ----- LABELED CT DATASETS -----
+# -------------------------------
+
+import os
+import torch
+import numpy as np
+import SimpleITK as sitk
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from PIL import Image
+
+class LabeledCTDataset(Dataset):
+    def __init__(self, images_dir, masks_dir, transform=None):
+        """
+        Initialize the dataset with directories for images and masks.
+
+        Args:
+            images_dir (str): Path to the directory containing the CT scan images.
+            masks_dir (str): Path to the directory containing the corresponding masks (.nii.gz format).
+            transform (callable, optional): Optional transforms to be applied on the images and masks.
+        """
+        self.images_dir = images_dir
+        self.masks_dir = masks_dir
+        self.transform = transform
+        
+        # Sort files to ensure alignment between images and masks
+        self.image_filenames = sorted(os.listdir(images_dir))
+        self.mask_filenames = sorted(os.listdir(masks_dir))
+
+        # Ensure the lengths of images and masks match
+        assert len(self.image_filenames) == len(self.mask_filenames), \
+            "Number of images and masks must match."
+
+    def __len__(self):
+        """
+        Return the total number of samples in the dataset.
+        """
+        return len(self.image_filenames)
+
+    def __getitem__(self, idx):
+        """
+        Retrieve an image and its corresponding mask by index.
+
+        Args:
+            idx (int): Index of the sample to retrieve.
+
+        Returns:
+            dict: A dictionary containing the image and the corresponding mask.
+        """
+        # Construct the full file paths
+        image_path = os.path.join(self.images_dir, self.image_filenames[idx])
+        mask_path = os.path.join(self.masks_dir, self.mask_filenames[idx])
+
+        # Read the image using SimpleITK
+        # image = sitk.ReadImage(image_path)
+        # image = sitk.GetArrayFromImage(image)  # Convert to numpy array
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # image = np.moveaxis(image, 0, -1)  # Move channel to last axis if necessary
+
+        # Read the mask using SimpleITK
+        mask = sitk.ReadImage(mask_path)
+        mask = sitk.GetArrayFromImage(mask)  # Convert to numpy array
+        mask = np.moveaxis(mask, 0, -1)  # Move channel to last axis if necessar
+        mask = np.squeeze(mask).astype(np.uint8)  # Remove unnecessary dimensions if needed
+
+        # Apply transformations if specified
+        if self.transform:
+            # Apply the same transform to both image and mask
+            transformed = self.transform(image=image, mask=mask)
+            image = transformed["image"]
+            mask = transformed["mask"]
+
+        return {
+            "image": image,
+            "mask": mask
+        }
+
+
+# Example of transforms
+from torchvision.transforms import functional as F
+
+class TransformWrapper:
+    def __init__(self):
+        self.image_transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((256, 256)),
+            transforms.ToTensor()
+        ])
+        self.mask_transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((256, 256)),
+            transforms.ToTensor()
+        ])
+    
+    def __call__(self, image, mask):
+        image = self.image_transform(image)
+        # print shape of image and mask
+
+        mask = self.mask_transform(mask).squeeze()
+        mask = torch.where(mask > 0.001, 1, 0)  # Threshold at a small value to binarize
+        # change type of mask to float32
+        mask = mask.float()
+        return {"image": image, "mask": mask}
+
+from torch.utils.data import DataLoader, random_split
+
+def get_labeled_CT_datasets(batch_size=16, num_workers=64):
+    # Define the dataset and transformations
+    transform = TransformWrapper()
+    dataset = LabeledCTDataset(images_dir="datasets/ct_scans/images", masks_dir="datasets/ct_scans/masks", transform=transform)
+
+    # Calculate the sizes for train, validation, and test splits
+    train_size = int(0.7 * len(dataset))  # 70% for training
+    valid_size = int(0.15 * len(dataset))  # 15% for validation
+    test_size = len(dataset) - train_size - valid_size  # Remaining 15% for testing
+
+    # Split the dataset
+    train_dataset, valid_dataset, test_dataset = random_split(dataset, [train_size, valid_size, test_size])
+
+    # Create DataLoaders for each split
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+    # Example usage (optional)
+    for batch in train_dataloader:
+        images, masks = batch["image"], batch["mask"]
+        print(f"Train batch: images {images.shape}, masks {masks.shape}")
+        break
+
+    for batch in valid_dataloader:
+        images, masks = batch["image"], batch["mask"]
+        print(f"Validation batch: images {images.shape}, masks {masks.shape}")
+        break
+
+    for batch in test_dataloader:
+        images, masks = batch["image"], batch["mask"]
+        print(f"Test batch: images {images.shape}, masks {masks.shape}")
+        break
+
+    return train_dataloader, valid_dataloader, test_dataloader
+
