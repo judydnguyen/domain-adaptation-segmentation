@@ -228,6 +228,7 @@ def save_test_samples(model, test_loader, device, parent_path='', save_path="tes
     with torch.no_grad():
         for data in test_loader:
             image, mask = data
+            image, mask = data["image"], data["mask"]
             mask = mask[0]
             if not mask.byte().any():
                 continue
