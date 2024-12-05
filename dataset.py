@@ -11,11 +11,13 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms as T
 import albumentations as A
 
+from albumentations.pytorch import ToTensorV2
+
 import cv2
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from utils import crop_sample, pad_sample, resize_sample, normalize_volume
+from utils import crop_sample, pad_sample, resize_sample, normalize_volume, set_seed
 from sklearn.model_selection import train_test_split
 
 
@@ -324,7 +326,8 @@ class LabeledCTDataset(Dataset):
 from torchvision.transforms import functional as F
 
 class TransformWrapper:
-    def __init__(self):
+    def __init__(self, pair_transforms=False):
+        self.pair_transforms = pair_transforms
         self.image_transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize((256, 256)),
@@ -335,37 +338,94 @@ class TransformWrapper:
             transforms.Resize((256, 256)),
             transforms.ToTensor()
         ])
+        
+        self.transforms = A.Compose([
+            A.Resize(256, 256),
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.Rotate(limit=30, p=0.5),
+            ToTensorV2()
+        ])
     
     def __call__(self, image, mask):
+        if self.pair_transforms:
+            augmented = self.transforms(image=image, mask=mask)
+            # mask = torch.tensor(image["mask"])
+            image, mask = augmented['image'], augmented['mask']
+            image = image.float()
+            mask = torch.where(mask > 0.01, 1, 0)
+            mask = mask.float()
+            return {"image": image, "mask": mask}
         image = self.image_transform(image)
         # print shape of image and mask
 
         mask = self.mask_transform(mask).squeeze()
-        mask = torch.where(mask > 0.001, 1, 0)  # Threshold at a small value to binarize
+        mask = torch.where(mask > 0.01, 1, 0)  # Threshold at a small value to binarize
         # change type of mask to float32
         mask = mask.float()
         return {"image": image, "mask": mask}
 
 from torch.utils.data import DataLoader, random_split
+from torch.utils.data import Subset, random_split, ConcatDataset
 
 def get_labeled_CT_datasets(batch_size=16, num_workers=64):
+    set_seed(42)
     # Define the dataset and transformations
-    transform = TransformWrapper()
+    transform = TransformWrapper(pair_transforms=False)
     dataset = LabeledCTDataset(images_dir="datasets/ct_scans/images", masks_dir="datasets/ct_scans/masks", transform=transform)
 
     # Calculate the sizes for train, validation, and test splits
     train_size = int(0.7 * len(dataset))  # 70% for training
     valid_size = int(0.15 * len(dataset))  # 15% for validation
     test_size = len(dataset) - train_size - valid_size  # Remaining 15% for testing
+    
+    dataset_size = len(dataset)
+    indices = torch.randperm(dataset_size).tolist()  # Shuffle indices
+    # Split indices
+    train_indices = indices[:train_size]
+    valid_indices = indices[train_size:train_size + valid_size]
+    test_indices = indices[train_size + valid_size:]
 
-    # Split the dataset
-    train_dataset, valid_dataset, test_dataset = random_split(dataset, [train_size, valid_size, test_size])
+    # Print sizes
+    print(f"Train size: {len(train_indices)}, Validation size: {len(valid_indices)}, Test size: {len(test_indices)}")
 
-    # Create DataLoaders for each split
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    # Create subsets for original dataset
+    train_dataset = Subset(dataset, train_indices)
+    valid_dataset = Subset(dataset, valid_indices)
+    test_dataset = Subset(dataset, test_indices)
 
+    # Load the transformed datasets
+    train_dataset_transformed = LabeledCTDataset(
+        images_dir="datasets/ct_scans/transformed/images",
+        masks_dir="datasets/ct_scans/transformed/masks",
+        transform=transform
+    )
+    train_dataset_transformed = Subset(train_dataset_transformed, range(5))
+    # Combine the original and transformed train datasets
+    combined_train_dataset = ConcatDataset([train_dataset, train_dataset_transformed])
+
+    # Create a DataLoader for the combined dataset
+    train_dataloader = DataLoader(
+        combined_train_dataset, 
+        # train_dataset,
+        batch_size=batch_size, 
+        shuffle=True,  # Keep shuffle=True for training
+        num_workers=num_workers
+    )
+    
+    valid_dataloader = DataLoader(
+        valid_dataset, 
+        batch_size=batch_size, 
+        shuffle=False,  # No need to shuffle for validation
+        num_workers=num_workers
+    )
+    test_dataloader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False,  # No need to shuffle for testing
+        num_workers=num_workers
+    )
+    
     # Example usage (optional)
     for batch in train_dataloader:
         images, masks = batch["image"], batch["mask"]
@@ -383,4 +443,3 @@ def get_labeled_CT_datasets(batch_size=16, num_workers=64):
         break
 
     return train_dataloader, valid_dataloader, test_dataloader
-

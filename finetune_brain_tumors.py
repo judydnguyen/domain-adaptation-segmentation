@@ -46,11 +46,14 @@ def training_loop(epochs, model, train_loader, valid_loader, optimizer, loss_fn,
             for i, data in enumerate(valid_loader):
                 # img, mask = data
                 img, mask = data["image"], data["mask"]
-                img, mask = img.to(device), mask.to(device)
+                img, mask = img.to(device), mask.to(device, dtype=torch.float32)
+                
                 predictions = model(img)
                 predictions = predictions.squeeze(1)
                 running_dice += dice_pytorch(predictions, mask).sum().item()
                 running_IoU += iou_pytorch(predictions, mask).sum().item()
+                # print(f"mask: {mask}")
+                # print(f"predictions: {predictions}")
                 loss = loss_fn(predictions, mask)
                 running_valid_loss += loss.item() * img.size(0)
         train_loss = running_loss / len(train_loader.dataset)
@@ -198,7 +201,7 @@ def test(model, test_loader, loss_fn):
         for i, data in enumerate(test_loader):
             # img, mask = data
             img, mask = data["image"], data["mask"]
-            img, mask = img.to(device), mask.to(device)
+            img, mask = img.to(device), mask.to(device, dtype=torch.float32)
             predictions = model(img)
             predictions = predictions.squeeze(1)
             # import IPython; IPython.embed()
@@ -278,6 +281,23 @@ def main(args):
     # train_loader, valid_loader, test_loader = get_train_test_loaders(args)
     train_loader, valid_loader, test_loader = get_labeled_CT_datasets(batch_size=args.batch_size, num_workers=args.num_workers)
     
+    # plot some samples
+    for i, data in enumerate(train_loader):
+        img, mask = data["image"], data["mask"]
+        print(f"img shape: {img.shape}")
+        print(f"mask shape: {mask.shape}")
+        plt.figure(figsize=(10, 10))
+        # plot both images and masks
+        for j in range(1):
+            plt.subplot(4, 2, 2*j + 1)
+            plt.imshow(img[j][0], cmap='gray')
+            plt.axis('off')
+            plt.subplot(4, 2, 2*j + 2)
+            plt.imshow(mask[j], cmap='gray')
+            plt.axis('off')
+            plt.savefig(f"debug_sample_{0}.png")
+            
+    
     print(f"---> loaded train loader: {len(train_loader)}")
     print(f"---> loaded valid loader: {len(valid_loader)}")
     print(f"---> loaded test loader: {len(test_loader)}")
@@ -294,22 +314,23 @@ def main(args):
     # print(model)
     loss_fn = BCE_dice
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    epochs = args.epochs
     lr_scheduler = ReduceLROnPlateau(optimizer=optimizer, patience=2,factor=0.2)
+    epochs = args.epochs
+    # lr_scheduler = ReduceLROnPlateau(optimizer=optimizer, patience=2,factor=0.1)
 
-    # history = training_loop(epochs, model, train_loader, valid_loader, optimizer, loss_fn, lr_scheduler)
+    history = training_loop(epochs, model, train_loader, valid_loader, optimizer, loss_fn, lr_scheduler)
     
     # # save model
-    # torch.save(model.state_dict(), f"{args.save_model_dir}/{args.save_model}")
+    torch.save(model.state_dict(), f"{args.save_model_dir}/{args.save_model}")
     
-    # plot_result(history, args.save_model_dir, suffix='unet')
-    # plot_score(history, args.save_model_dir, suffix='unet')
+    plot_result(history, args.save_model_dir, suffix='unet')
+    plot_score(history, args.save_model_dir, suffix='unet')
     # model.load_state_dict(torch.load(f"{args.save_model_dir}/{args.save_model}"))
-    model.load_state_dict(torch.load("weights/lgg-mri-segmentation.pth"))
+    # model.load_state_dict(torch.load("weights/lgg-mri-segmentation.pth"))
     
     test(model, test_loader, loss_fn)
-    save_test_samples(model, test_loader, device, parent_path=args.save_model_dir, save_path="test_samples_CT_mapped.png")
-    save_test_samples_with_masks(model, test_loader, device, parent_path=args.save_model_dir, save_path="test_samples_CT_separated.png")
+    save_test_samples(model, test_loader, device, parent_path=args.save_model_dir, save_path=f"{args.save_model.split('.')[0]}_test_samples_CT_mapped.png")
+    save_test_samples_with_masks(model, test_loader, device, parent_path=args.save_model_dir, save_path=f"{args.save_model.split('.')[0]}_test_samples_CT_separated.png")
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
