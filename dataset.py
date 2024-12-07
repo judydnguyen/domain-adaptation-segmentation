@@ -327,11 +327,17 @@ from torchvision.transforms import functional as F
 
 class TransformWrapper:
     def __init__(self, pair_transforms=False):
+        mean, std = [0.23276818, 0.23326994, 0.23333506], [0.22573704, 0.22619095, 0.22634698]
         self.pair_transforms = pair_transforms
         self.image_transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize((256, 256)),
-            transforms.ToTensor()
+            # change contrast and brightness
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+            transforms.ToTensor(),
+            # transforms.Normalize(mean=[0.5], std=[0.5]),
+            # transforms.Normalize(mean=mean, std=std),
+            
         ])
         self.mask_transform = transforms.Compose([
             transforms.ToPILImage(),
@@ -353,14 +359,14 @@ class TransformWrapper:
             # mask = torch.tensor(image["mask"])
             image, mask = augmented['image'], augmented['mask']
             image = image.float()
-            mask = torch.where(mask > 0.01, 1, 0)
+            mask = torch.where(mask > 0.001, 1, 0)
             mask = mask.float()
             return {"image": image, "mask": mask}
         image = self.image_transform(image)
         # print shape of image and mask
 
         mask = self.mask_transform(mask).squeeze()
-        mask = torch.where(mask > 0.01, 1, 0)  # Threshold at a small value to binarize
+        mask = torch.where(mask > 0.002, 1, 0)  # Threshold at a small value to binarize
         # change type of mask to float32
         mask = mask.float()
         return {"image": image, "mask": mask}
@@ -443,3 +449,125 @@ def get_labeled_CT_datasets(batch_size=16, num_workers=64):
         break
 
     return train_dataloader, valid_dataloader, test_dataloader
+
+# define a function to load datasets
+import torchio as tio
+from pathlib import Path
+
+def get_datasets(training_transform, validation_transform):
+    # Define dataset paths
+    dataset_dir = Path("datasets/ct_scans")
+    images_dir = dataset_dir / "images"
+    labels_dir = dataset_dir / "masks"
+
+    # Collect file paths
+    image_paths = sorted(images_dir.glob("*"))  # Adjust extension if necessary
+    label_paths = sorted(labels_dir.glob("*.nii.gz"))
+    print(f"Number of images: {len(image_paths)}")
+    print(f"Number of labels: {len(label_paths)}")
+    assert len(image_paths) == len(label_paths), "Mismatch between image and label counts!"
+
+    # Create subjects
+    subjects = []
+    for image_path, label_path in zip(image_paths, label_paths):
+        
+        # ct=tio.ScalarImage(image_path)
+        # print shape of ct
+        # print(f"shape of ct: {ct.shape}")
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # print(f"shape of image: {image.shape}")
+        # convert image to torch tensor
+        image_tensor = torch.tensor(image).unsqueeze(0).transpose(0, 3).transpose(1, 2).float()
+        image_tensor /= 255.0
+        print(f"shape of image tensor: {image_tensor.shape}")
+        ct = tio.ScalarImage(tensor = image_tensor)
+        brain=tio.LabelMap(label_path)
+        # print(f"shape of brain: {brain.shape}")
+        # # print range of brain
+        # print(f"range of brain: {brain.tensor.min()}, {brain.tensor.max()}")
+        # # print unique values of brain
+        # print(f"unique values of brain: {np.unique(brain.tensor)}")
+        # # print unique values of ct
+        # print(f"unique values of ct: {np.unique(ct.tensor)}")
+        # print shape of ct
+        if ct.shape[0]!=3:
+            ct= tio.ScalarImage(tensor = ct.tensor.repeat(3,1,1,1))
+            print(f"shape of ct: {ct.shape}")
+        else:
+            ct= tio.ScalarImage(tensor = ct.tensor)
+            print('untouched')
+        brain= tio.LabelMap(tensor = brain.tensor)
+        subject = tio.Subject(
+            image=ct,
+            mask=brain,
+        )
+        subjects.append(subject)
+
+    # Create dataset
+    dataset = tio.SubjectsDataset(subjects)
+    print('Dataset size:', len(dataset), 'subjects')
+    
+    # Create dataset
+    training_split_ratio = 0.7
+    dataset = tio.SubjectsDataset(subjects)
+    num_subjects = len(dataset)
+    num_training_subjects = int(training_split_ratio * num_subjects)
+    num_validation_subjects = num_subjects - num_training_subjects
+
+    num_split_subjects = num_training_subjects, num_validation_subjects
+    training_subjects, validation_subjects = torch.utils.data.random_split(subjects, num_split_subjects, generator=torch.Generator().manual_seed(42))
+    validation_subjects, test_subjects = torch.utils.data.random_split(validation_subjects, [num_validation_subjects // 2, num_validation_subjects // 2], generator=torch.Generator().manual_seed(42))
+
+    training_set = tio.SubjectsDataset(
+        training_subjects, transform=training_transform)
+
+    validation_set = tio.SubjectsDataset(
+        validation_subjects, transform=validation_transform)
+    
+    test_set = tio.SubjectsDataset(test_subjects, 
+                                   transform=validation_transform)
+
+    print('Training set:', len(training_set), 'subjects')
+    print('Validation set:', len(validation_set), 'subjects')
+    print('Test set:', len(test_set), 'subjects')
+    return training_set, validation_set, test_set
+
+def get_transformed_loader():
+    set_seed(11)
+    training_transform = tio.Compose([
+        tio.ToCanonical(),
+        #tio.Resample(1),
+        #tio.CropOrPad((48, 60, 48)),
+        tio.Resize((256,256,1)),
+        # tio.RandomMotion(p=0.2),
+        # tio.RandomBiasField(p=0.3),
+        # tio.RandomNoise(p=0.5),
+        # tio.RandomFlip(),
+        # tio.OneOf({
+        #     tio.RandomAffine(): 0.6,
+        # #  tio.RandomElasticDeformation(): 0.2,
+        # }),
+        # to tensor
+        # tio.ToTensor(),
+        # tio.OneHot(),
+    ])
+
+    validation_transform = tio.Compose([
+        tio.ToCanonical(),
+        tio.Resize((256,256,1)),
+        # tio.ToTensor(),
+        #tio.Resample(ct),
+        #tio.CropOrPad((48, 60, 48)),
+        # tio.OneHot(),
+    ])
+    
+    training_set, validation_set, test_set = get_datasets(training_transform, validation_transform)
+    
+    # turn into dataloaders
+    train_dataloader = DataLoader(training_set, batch_size=1, shuffle=True, num_workers=4)
+    valid_dataloader = DataLoader(validation_set, batch_size=1, shuffle=False, num_workers=4)
+    test_dataloader = DataLoader(test_set, batch_size=1, shuffle=False, num_workers=4)
+    
+    return train_dataloader, valid_dataloader, test_dataloader
+

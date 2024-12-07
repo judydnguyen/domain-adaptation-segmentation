@@ -6,11 +6,15 @@ import matplotlib.patches as mpatches
 from scipy.ndimage.morphology import binary_dilation
 
 import torch
+
 from tqdm import tqdm
-from dataset import get_labeled_CT_datasets, get_train_test_loaders
+from dataset import get_labeled_CT_datasets, get_train_test_loaders, get_transformed_loader
 import segmentation_models_pytorch as smp
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from utils import BCE_dice, EarlyStopping, dice_pytorch, iou_pytorch, plot_result, plot_score, set_seed
+
+import warnings
+warnings.filterwarnings("ignore")
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -26,7 +30,9 @@ def training_loop(epochs, model, train_loader, valid_loader, optimizer, loss_fn,
         for i, data in enumerate(tqdm(train_loader)):
             # img, mask = data
             img, mask = data["image"], data["mask"]
-            img, mask = img.to(device), mask.to(device)
+            img = img.tensor.squeeze(-1)
+            mask = mask.tensor.squeeze(-1).squeeze(0)
+            img, mask = img.to(device, dtype=torch.float32), mask.to(device)
             # input_tensor = input_tensor.to(device, dtype=torch.float)
             mask = mask.to(device, dtype=torch.float32)
             predictions = model(img)
@@ -45,9 +51,14 @@ def training_loop(epochs, model, train_loader, valid_loader, optimizer, loss_fn,
             running_valid_loss = 0
             for i, data in enumerate(valid_loader):
                 # img, mask = data
+                # img, mask = data["image"], data["mask"]
+                # img, mask = img.to(device), mask.to(device, dtype=torch.float32)
                 img, mask = data["image"], data["mask"]
-                img, mask = img.to(device), mask.to(device, dtype=torch.float32)
-                
+                img = img.tensor.squeeze(-1)
+                mask = mask.tensor.squeeze(-1).squeeze(0)
+                img, mask = img.to(device, dtype=torch.float32), mask.to(device)
+                # input_tensor = input_tensor.to(device, dtype=torch.float)
+                mask = mask.to(device, dtype=torch.float32)
                 predictions = model(img)
                 predictions = predictions.squeeze(1)
                 running_dice += dice_pytorch(predictions, mask).sum().item()
@@ -160,8 +171,15 @@ def save_test_samples_with_masks(model, test_loader, device, parent_path='', sav
     with torch.no_grad():
         for data in test_loader:
             image, mask = data["image"], data["mask"]
-            mask = mask[0]
-            image = image.to(device)
+            image = image.tensor.squeeze(-1)
+            # mask = mask.tensor.squeeze(-1).squeeze(0)
+            mask = mask.tensor.squeeze(-1).squeeze(0)
+            image, mask = image.to(device, dtype=torch.float32), mask.to(device, dtype=torch.float32)
+            # input_tensor = input_tensor.to(device, dtype=torch.float)
+            # mask = mask.to(device, dtype=torch.float32)
+            # Skip samples without any ground truth mask
+            mask = mask[0].cpu()
+            # image = image.to(device)
             prediction = model(image).to('cpu')[0][0]
             print(f"Sum of prediction: {prediction.sum()}")
             prediction = torch.where(prediction > 0.2, 1, 0)
@@ -200,8 +218,13 @@ def test(model, test_loader, loss_fn):
         running_loss = 0
         for i, data in enumerate(test_loader):
             # img, mask = data
+            # img, mask = data["image"], data["mask"]
+            # img, mask = img.to(device), mask.to(device, dtype=torch.float32)
             img, mask = data["image"], data["mask"]
-            img, mask = img.to(device), mask.to(device, dtype=torch.float32)
+            img = img.tensor.squeeze(-1)
+            mask = mask.tensor.squeeze(-1).squeeze(0)
+            img, mask = img.to(device, dtype=torch.float32), mask.to(device, dtype=torch.float32)
+            
             predictions = model(img)
             predictions = predictions.squeeze(1)
             # import IPython; IPython.embed()
@@ -237,12 +260,27 @@ def save_test_samples(model, test_loader, device, parent_path='', save_path="tes
     )
     
     i = 0
+    model.to(device)
     with torch.no_grad():
         for data in test_loader:
-            image, mask = data
+            # image, mask = data
             image, mask = data["image"], data["mask"]
-            mask = mask[0]
+            image = image.tensor.squeeze(-1)
+            # mask = mask.tensor.squeeze(-1).squeeze(0)
+            mask = mask.tensor.squeeze(-1).squeeze(0)
+            image, mask = image.to(device, dtype=torch.float32), mask.to(device, dtype=torch.float32)
+            # save original image
+            # # image = image.to("cpu")
+            # # axs[i].imshow(image[0][0], cmap='gray')
+            # # axs[i].axis('off')  # Turn off axes for a cleaner plot
+            # image = image.tensor.squeeze(-1)
+            # # mask = mask.tensor.squeeze(-1).squeeze(0)
+            # mask = mask.tensor.squeeze(-1).squeeze(0)
+            # image, mask = image.to(device, dtype=torch.float32), mask.to(device, dtype=torch.float32)
+            # input_tensor = input_tensor.to(device, dtype=torch.float)
+            # mask = mask.to(device, dtype=torch.float32)
             # Skip samples without any ground truth mask
+            mask = mask[0]
             if not mask.byte().any():
                 continue
             
@@ -251,8 +289,8 @@ def save_test_samples(model, test_loader, device, parent_path='', save_path="tes
             prediction = torch.where(prediction > 0.5, 1, 0)
             
             prediction_edges = prediction - binary_dilation(prediction)
-            ground_truth = mask - binary_dilation(mask)
-            
+            ground_truth = mask.cpu() - binary_dilation(mask.cpu())
+            # import IPython; IPython.embed()
             image[0, 0, ground_truth.bool()] = 1  # Highlight ground truth in red
             image[0, 1, prediction_edges.bool()] = 1  # Highlight prediction in green
             
@@ -278,24 +316,26 @@ def main(args):
     test_loader = None
     valid_loader = None
     
-    # train_loader, valid_loader, test_loader = get_train_test_loaders(args)
-    train_loader, valid_loader, test_loader = get_labeled_CT_datasets(batch_size=args.batch_size, num_workers=args.num_workers)
+    # train_loader, valid_loader, test_loader = get_train_test_loaders(args) # MRI dataset
+    # train_loader, valid_loader, test_loader = get_labeled_CT_datasets(batch_size=args.batch_size, num_workers=args.num_workers)
+    train_loader, valid_loader, test_loader = get_transformed_loader()
     
     # plot some samples
-    for i, data in enumerate(train_loader):
-        img, mask = data["image"], data["mask"]
-        print(f"img shape: {img.shape}")
-        print(f"mask shape: {mask.shape}")
-        plt.figure(figsize=(10, 10))
-        # plot both images and masks
-        for j in range(1):
-            plt.subplot(4, 2, 2*j + 1)
-            plt.imshow(img[j][0], cmap='gray')
-            plt.axis('off')
-            plt.subplot(4, 2, 2*j + 2)
-            plt.imshow(mask[j], cmap='gray')
-            plt.axis('off')
-            plt.savefig(f"debug_sample_{0}.png")
+    # for i, data in enumerate(train_loader):
+    #     img, mask = data["image"], data["mask"]
+    #     print("data: ", data)
+    #     print(f"img shape: {img.shape}")
+    #     print(f"mask shape: {mask.shape}")
+    #     plt.figure(figsize=(10, 10))
+    #     # plot both images and masks
+    #     for j in range(1):
+    #         plt.subplot(4, 2, 2*j + 1)
+    #         plt.imshow(img[j][0], cmap='gray')
+    #         plt.axis('off')
+    #         plt.subplot(4, 2, 2*j + 2)
+    #         plt.imshow(mask[j], cmap='gray')
+    #         plt.axis('off')
+    #         plt.savefig(f"debug_sample_{0}.png")
             
     
     print(f"---> loaded train loader: {len(train_loader)}")
@@ -323,8 +363,8 @@ def main(args):
     # # save model
     torch.save(model.state_dict(), f"{args.save_model_dir}/{args.save_model}")
     
-    plot_result(history, args.save_model_dir, suffix='unet')
-    plot_score(history, args.save_model_dir, suffix='unet')
+    # plot_result(history, args.save_model_dir, suffix='unet')
+    # plot_score(history, args.save_model_dir, suffix='unet')
     # model.load_state_dict(torch.load(f"{args.save_model_dir}/{args.save_model}"))
     # model.load_state_dict(torch.load("weights/lgg-mri-segmentation.pth"))
     

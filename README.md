@@ -1,79 +1,68 @@
-# U-Net for brain segmentation
+# Few-shot Domain Adaptation for Cross-Modality Image Segmentation
 
-U-Net implementation in PyTorch for FLAIR abnormality segmentation in brain MRI based on a deep learning segmentation algorithm used in [Association of genomic subtypes of lower-grade gliomas with shape features automatically extracted by a deep learning algorithm](https://doi.org/10.1016/j.compbiomed.2019.05.002).
+Authors: Skyler Grandel and Dung (Judy) Nguyen
 
-This repository is an all Python port of official MATLAB/Keras implementation in [brain-segmentation](https://github.com/mateuszbuda/brain-segmentation).
-Weights for trained models are provided and can be used for inference or fine-tuning on a different dataset.
-If you use code or weights shared in this repository, please consider citing:
+-----
+For this project we investigated domain adaptation for medical image segmentation on the subject of tumorous brain scans, transferring domains from Magnetic Resonance Images (MRIs) to to Computed Tomography (CT) scans. MRIs are know to be superior to CT scans for identifying and segmenting brain
+tumors, but CT scans are faster and cheaper.
+> How a segmentation model trained on MRI can be adapted on CT dataset?
 
-```
-@article{buda2019association,
-  title={Association of genomic subtypes of lower-grade gliomas with shape features automatically extracted by a deep learning algorithm},
-  author={Buda, Mateusz and Saha, Ashirbani and Mazurowski, Maciej A},
-  journal={Computers in Biology and Medicine},
-  volume={109},
-  year={2019},
-  publisher={Elsevier},
-  doi={10.1016/j.compbiomed.2019.05.002}
-}
-```
+**Key contribution:**
+- Study performance medical segmentation model on unseen domain (source domain: MRI, target domain: CT scans).
+- Domain adaptation to adapt MRI-trained model to CT scans.
+- Study effect of data augmentation within the context of domain adaptation problem.
 
-## data
-
-![dataset](./assets/brain-mri-lgg.png)
-
-Dataset used for development and evaluation was made publicly available on Kaggle: [kaggle.com/mateuszbuda/lgg-mri-segmentation](https://www.kaggle.com/mateuszbuda/lgg-mri-segmentation).
-It contains MR images from [TCIA LGG collection](https://wiki.cancerimagingarchive.net/display/Public/TCGA-LGG) with segmentation masks approved by a board-certified radiologist at Duke University.
-
-## model
-
-A segmentation model implemented in this repository is U-Net as described in [Association of genomic subtypes of lower-grade gliomas with shape features automatically extracted by a deep learning algorithm](https://doi.org/10.1016/j.compbiomed.2019.05.002) with added batch normalization.
-
-![unet](./assets/unet.png)
-
-## results
-
-|![TCGA_DU_6404_19850629](./assets/TCGA_DU_6404_19850629.gif)|![TCGA_HT_7879_19981009](./assets/TCGA_HT_7879_19981009.gif)|![TCGA_CS_4944_20010208](./assets/TCGA_CS_4944_20010208.gif)|
-|:-------:|:-------:|:-------:|
-| 94% DSC | 91% DSC | 89% DSC |
-
-Qualitative results for validation cases from three different institutions with DSC of 94%, 91%, and 89%.
-Green outlines correspond to ground truth and red to model predictions.
-Images show FLAIR modality after preprocessing. 
-
-![dsc](./assets/dsc.png)
-
-Distribution of DSC for 10 randomly selected validation cases.
-The red vertical line corresponds to mean DSC (91%) and the green one to median DSC (92%).
-Results may be biased since model selection was based on the mean DSC on these validation cases.
-
-## inference
-
-1. Download and extract the dataset from [Kaggle](https://www.kaggle.com/mateuszbuda/lgg-mri-segmentation).
-2. Run docker container.
-3. Run `inference.py` script with specified paths to weights and images. Trained weights for input images of size 256x256 are provided in `./weights/unet.pt` file. For more options and help run: `python3 inference.py --help`.
-
-## train
-
-1. Download and extract the dataset from [Kaggle](https://www.kaggle.com/mateuszbuda/lgg-mri-segmentation).
-2. Run docker container.
-3. Run `train.py` script. Default path to images is `./kaggle_3m`. For more options and help run: `python3 train.py --help`.
-
-Training can be also run using Kaggle kernel shared together with the dataset: [kaggle.com/mateuszbuda/brain-segmentation-pytorch](https://www.kaggle.com/mateuszbuda/brain-segmentation-pytorch).
-Due to memory limitations for Kaggle kernels, input images are of size 224x224 instead of 256x256.
-
-Running this code on a custom dataset would likely require adjustments in `dataset.py`.
-Should you need help with this, just open an issue.
-
-
-## Judy's Notes
+## How to run
+- Install neccessary packages:
+  ```
+  pip3 install --no-cache-dir -r requirements.txt
+  ```
+- We used two datasets:
 - Datasets: 
-  - MRI: [kaggle-link](https://www.kaggle.com/datasets/mateuszbuda/lgg-mri-segmentation), can be downloaded as `.zip` or using `kaggle-hub`
+  - MRI: [kaggle-link](https://www.kaggle.com/datasets/mateuszbuda/lgg-mri-segmentation)
   - CT: https://www.kaggle.com/datasets/mahmoudshaheen1134/brain-tumor-dataset/data
+  - This step can be done via by downloading `.zip` or using `kaggle-hub`
 - Pre-trained model ckpt: https://vanderbilt.box.com/s/kcb6n5n3e92janqnbvhmrsffsyardkzq
-- I prepared a `.ipynb` file to load and run the inference on MRI images at `load_data.ipynb`.
-- Test on CT dataset: `test_brain_tumors.ipynb`
-- Running fine-tuning model on labeled dataset
+
+- Interactive notebook files for running inferences on both datasets: [test_brain_tumors.ipynb](notebooks/test_brain_tumors.ipynb)
+
+- Data augmentation: [data_augmentation.ipynb](notebooks/data_augmentation.ipynb)
+
+- Train a U-net model from scratch: 
+  ```
+  python train.py
+  ```
+
+- To start fine-tuning:
+  ```
+  python3 finetune_no_augmentation.py --epochs 10
+  ```
+
+  ```
+  python3 finetune_brain_tumors.py --batch_size 1 --lr 0.001 --save_model no_aug_model.pth --epochs 10
+  ```
+
+## Breakdown of the code structure
+
 ```
-python3 finetune_brain_tumors.py --batch_size 1 --save_model ct_ft_model.pth --lr 0.0
+├── notebooks                   <- contains interactive python files
+│   ├── test_brain_tumors.ipynb       <- testing on both datasets
+│   ├── data_augmentation.ipynb       <- ITK augmentation
+├── datasets                    <- downloaded datasets
+├── helpers                     <- utilities
+│   ├── plot_helper             
+│   ├── augmentation_helper     
+├── weights                     <- saved models and plots
+├── datasets.py                 <- loading datasets, augmentation
+├── finetune_brain_tumors.py    <- finetuning with augmentation
+├── finetune_no_augmentation.py <- finetuning no augmentation
+├── train.py                    <- training model wit MRI data
+├── .gitignore                <- List of files ignored by git
 ```
+
+The graph below lists out our key main functions with modification compared to original works we acknowledged.
+
+## Acknowledgement
+- https://github.com/mateuszbuda/brain-segmentation-pytorch
+- https://www.kaggle.com/code/abdallahwagih/brain-tumor-segmentation-unet-efficientnetb7
+- Buda, Mateusz, Ashirbani Saha, and Maciej A. Mazurowski. "Association of genomic subtypes of lower-grade gliomas with shape features automatically extracted by a deep learning algorithm." Computers in biology and medicine 109 (2019): 218-225.
